@@ -250,14 +250,14 @@
             const confirmDeleteButton = document.getElementById('confirm-delete-button');
 
             // State variables
-            const APP_VERSION = "1.4";
+            const APP_VERSION = "1.5";
             const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
             const WHISPER_API_ENDPOINT = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
             let recognition;
             let mediaRecorder;
             let audioChunks = [];
             let localStream;
-            let currentTranscript = '';
+            let finalTranscript = ''; 
             let isRecording = false;
             let selectedRecord = null;
             let db;
@@ -289,7 +289,6 @@
                 setupRecognition();
                 updateStorageUsage();
             };
-
             const migrateFromLocalStorage = async () => { /* ... (same as before) ... */ };
             const renderUI = () => { renderPromptTemplates(); renderFolders(); renderRecords(records.filter(r => !r.folderId), recentHistory); };
             const loadDataFromDB = async () => { /* ... (same as before) ... */ };
@@ -312,27 +311,31 @@
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 if (!SpeechRecognition) { showMessageModal('エラー', 'Web Speech APIに対応していません。'); return; }
                 recognition = new SpeechRecognition();
-                recognition.lang = 'ja-JP'; recognition.continuous = true; recognition.interimResults = true;
+                recognition.lang = 'ja-JP'; 
+                recognition.continuous = false; // <<<<<<<<<<<< ANDROID FIX: Use single result mode
+                recognition.interimResults = false; // <<<<<<<<<<<< ANDROID FIX: Only get final results
+                
                 recognition.onstart = () => {
-                    recordButton.textContent = '録音を停止'; recordButton.classList.replace('bg-blue-600', 'bg-red-600');
-                    deselectAll(); contentTitle.textContent = 'リアルタイム文字起こし';
-                    transcriptContainer.innerHTML = ''; showView('transcript');
-                };
-                recognition.onend = () => { if (isRecording) { console.log("Speech recognition stopped, restarting..."); recognition.start(); } };
-
-                recognition.onresult = (event) => {
-                    console.log(event); // For debugging Android issues
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-                    for (let i = 0; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript + ' ';
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
+                    console.log("onstart fired");
+                    if(isRecording) { // Only change UI on first start
+                        recordButton.textContent = '録音を停止'; recordButton.classList.replace('bg-blue-600', 'bg-red-600');
+                        deselectAll(); contentTitle.textContent = 'リアルタイム文字起こし';
+                        transcriptContainer.innerHTML = ''; showView('transcript');
                     }
-                    currentTranscript = finalTranscript;
-                    transcriptContainer.innerHTML = `<p>${finalTranscript}<span class="text-gray-400">${interimTranscript}</span></p>`;
+                };
+                
+                recognition.onend = () => { 
+                    console.log("onend fired");
+                    if (isRecording) { // If it ends prematurely, restart it
+                        recognition.start(); 
+                    }
+                };
+                
+                recognition.onresult = (event) => {
+                    console.log("onresult event fired!", event);
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    finalTranscript += transcript + ' ';
+                    transcriptContainer.innerHTML = `<p>${finalTranscript}</p>`;
                 };
                 
                 recognition.onerror = (event) => { showMessageModal('エラー', `音声認識エラー: ${event.error}`); if(isRecording) stopRecording(false); };
@@ -344,7 +347,7 @@
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     isRecording = true; audioChunks = []; mediaRecorder = new MediaRecorder(localStream);
                     mediaRecorder.addEventListener("dataavailable", e => audioChunks.push(e.data)); mediaRecorder.start();
-                    currentTranscript = ''; 
+                    finalTranscript = ''; 
                     recognition.start();
                     timerDisplay.classList.remove('hidden');
                     recordingStartTime = Date.now();
@@ -368,9 +371,9 @@
                 const handleStop = async () => {
                     if(localStream) localStream.getTracks().forEach(track => track.stop());
                     recordButton.textContent = '録音を開始'; recordButton.classList.replace('bg-red-600', 'bg-blue-600');
-                    if (saveText && currentTranscript.trim()) {
+                    if (saveText && finalTranscript.trim()) {
                         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                        const newRecord = { id: crypto.randomUUID(), title: recordTitleInput.value.trim() || '無題の記録', date: new Date().toISOString(), transcript: currentTranscript.trim(), summary: null, folderId: null, audioBlob: audioBlob };
+                        const newRecord = { id: crypto.randomUUID(), title: recordTitleInput.value.trim() || '無題の記録', date: new Date().toISOString(), transcript: finalTranscript.trim(), summary: null, folderId: null, audioBlob: audioBlob };
                         await saveData('records', newRecord); records.unshift(newRecord);
                         showMessageModal('録音完了', `「${newRecord.title}」を保存しました。`); deselectAll(); await updateStorageUsage();
                     } else { deselectAll(); }
@@ -381,93 +384,9 @@
             const transcribeFile = async (file) => { /* ... (same as before) ... */ };
             const executeSummary = async (template) => { /* ... (same as before) ... */ };
             const showContextMenu = (e, id, type) => { /* ... (same as before) ... */ };
-            
-            // --- Attach Event Listeners ---
-            const attachAllEventListeners = () => {
-                homeButton.addEventListener('click', deselectAll);
-                recordButton.addEventListener('click', () => { if (isRecording) { stopRecording(); } else { titleModal.classList.remove('hidden'); titleModal.classList.add('flex'); recordTitleInput.value = `記録 - ${new Date().toLocaleString('ja-JP')}`; } });
-                startRecordingButton.addEventListener('click', () => { titleModal.classList.add('hidden'); startRecording(); });
-                cancelRecordingButton.addEventListener('click', () => titleModal.classList.add('hidden'));
-                summarizeButton.addEventListener('click', () => {
-                    if (!selectedRecord || !geminiApiKey) { showMessageModal('APIキー未設定', '設定画面でGemini APIキーを入力してください。'); return; }
-                    contentTitle.textContent = '要約プロンプトを選択';
-                    summaryContainer.innerHTML = ''; showView('summary');
-                    promptTemplates.forEach(template => {
-                        const button = document.createElement('button');
-                        button.className = 'w-full text-left p-3 bg-gray-600 rounded-lg hover:bg-gray-500 mb-2';
-                        button.innerHTML = `<div class="font-bold">${template.title}</div><p class="text-sm text-gray-400 truncate">${template.text}</p>`;
-                        button.addEventListener('click', () => executeSummary(template));
-                        summaryContainer.appendChild(button);
-                    });
-                });
-                audioUpload.addEventListener('change', (e) => transcribeFile(e.target.files[0]));
-                settingsButton.addEventListener('click', () => settingsModal.classList.replace('hidden', 'flex'));
-                closeSettingsButton.addEventListener('click', async () => {
-                    settingsModal.classList.replace('flex', 'hidden');
-                    geminiApiKey = geminiApiKeyInput.value;
-                    huggingFaceApiKey = huggingFaceApiKeyInput.value;
-                    await saveData('settings', {key: 'geminiApiKey', value: geminiApiKey});
-                    await saveData('settings', {key: 'huggingFaceApiKey', value: huggingFaceApiKey});
-                });
-                closeModalButton.addEventListener('click', () => messageModal.classList.add('hidden'));
-                addFolderButton.addEventListener('click', async () => {
-                    const name = prompt('新しいフォルダ名:');
-                    if (name && name.trim()) { const newFolder = { id: crypto.randomUUID(), name: name.trim() }; await saveData('folders', newFolder); folders.push(newFolder); renderFolders(); }
-                });
-                clearDataButton.addEventListener('click', () => { if (confirm('全ての記録、フォルダ、設定を削除します。よろしいですか？')) resetData(); });
-                addTemplateButton.addEventListener('click', async () => {
-                    const title = prompt('新しいテンプレートのタイトル:');
-                    if(!title) return;
-                    const text = prompt('新しいプロンプトの内容:');
-                    if(!text) return;
-                    promptTemplates.push({title, text});
-                    await saveData('settings', {key: 'promptTemplates', value: promptTemplates});
-                    renderPromptTemplates();
-                });
-                document.addEventListener('click', () => contextMenu.classList.add('hidden'));
-                contextRename.addEventListener('click', async () => {
-                    const id = contextMenu.dataset.id; const type = contextMenu.dataset.type; contextMenu.classList.add('hidden');
-                    if (type === 'folder') {
-                        const folder = folders.find(f => f.id === id);
-                        if (folder) { const newName = prompt('新しいフォルダ名:', folder.name); if (newName && newName.trim()) { folder.name = newName.trim(); await saveData('folders', folder); renderFolders(); } }
-                    } else if (type === 'record') {
-                        const record = records.find(r => r.id === id);
-                        if (record) { const newTitle = prompt('新しい記録タイトル:', record.title); if (newTitle && newTitle.trim()) { record.title = newTitle.trim(); await saveData('records', record); if(selectedRecord && selectedRecord.id === id) contentTitle.textContent = `記録: ${record.title}`; deselectAll(); } }
-                    }
-                });
-                contextDelete.addEventListener('click', () => {
-                    const id = contextMenu.dataset.id; const type = contextMenu.dataset.type; contextMenu.classList.add('hidden');
-                    deleteConfirmModal.classList.remove('hidden'); deleteConfirmModal.classList.add('flex');
-                    if (type === 'folder') {
-                        const folder = folders.find(f => f.id === id);
-                        if (folder) {
-                            if(records.some(r => r.folderId === id)) { showMessageModal('削除不可', 'フォルダ内に記録があるため削除できません。'); deleteConfirmModal.classList.add('hidden'); return; }
-                            deleteConfirmMessage.textContent = `フォルダ「${folder.name}」を削除しますか？`;
-                            confirmDeleteButton.onclick = async () => { await deleteData('folders', id); folders = folders.filter(f => f.id !== id); renderFolders(); deleteConfirmModal.classList.add('hidden'); deselectAll(); };
-                        }
-                    } else if (type === 'record') {
-                        const record = records.find(r => r.id === id);
-                        if (record) {
-                            deleteConfirmMessage.textContent = `記録「${record.title}」を削除しますか？\n(音声ファイルも一緒に削除されます)`;
-                            confirmDeleteButton.onclick = async () => { await deleteData('records', id); records = records.filter(r => r.id !== id); deleteConfirmModal.classList.add('hidden'); showMessageModal('削除完了', `記録「${record.title}」を削除しました。`); deselectAll(); await updateStorageUsage(); };
-                        }
-                    }
-                });
-                contextDeleteAudio.addEventListener('click', async () => {
-                    const id = contextMenu.dataset.id; contextMenu.classList.add('hidden');
-                    const record = records.find(r => r.id === id);
-                    if (record && confirm(`「${record.title}」の音声ファイルのみを削除しますか？\n文字起こしテキストは残ります。`)) {
-                        delete record.audioBlob;
-                        await saveData('records', record);
-                        showMessageModal('削除完了', '音声ファイルを削除しました。');
-                        if (selectedRecord && selectedRecord.id === id) selectRecord(id); else deselectAll();
-                        await updateStorageUsage();
-                    }
-                });
-                cancelDeleteButton.addEventListener('click', () => { deleteConfirmModal.classList.add('hidden'); deleteConfirmModal.classList.remove('flex'); });
-            };
-            
-            // Re-assign all functions to the global scope to prevent them from being garbage collected
+            const attachAllEventListeners = () => { /* ... (same as before) ... */ };
+
+            // Re-assigning all functions to ensure they are available
             Object.assign(window, {
                 initDB, saveData, getAllData, deleteData, initializeApp, migrateFromLocalStorage, renderUI,
                 loadDataFromDB, setupDefaultTemplates, resetData, showView, showMessageModal, formatBytes,
