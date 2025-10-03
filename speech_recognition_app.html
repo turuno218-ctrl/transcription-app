@@ -405,17 +405,17 @@
                 };
                 recognition.onend = () => { if (isRecording) { console.log("Speech recognition stopped, restarting..."); recognition.start(); } };
                 recognition.onresult = (event) => {
+                    let finalTranscript = '';
                     let interimTranscript = '';
-                    let finalTranscriptChunk = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    for (let i = 0; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            finalTranscriptChunk += event.results[i][0].transcript;
+                            finalTranscript += event.results[i][0].transcript + ' ';
                         } else {
                             interimTranscript += event.results[i][0].transcript;
                         }
                     }
-                    currentTranscript += finalTranscriptChunk; // Append only final results
-                    transcriptContainer.innerHTML = `<p>${currentTranscript}${interimTranscript}</p>`;
+                    currentTranscript = finalTranscript;
+                    transcriptContainer.innerHTML = `<p>${finalTranscript}${interimTranscript}</p>`;
                 };
                 recognition.onerror = (event) => { showMessageModal('エラー', `音声認識エラー: ${event.error}`); if(isRecording) stopRecording(false); };
             };
