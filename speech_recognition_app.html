@@ -250,7 +250,7 @@
             const confirmDeleteButton = document.getElementById('confirm-delete-button');
 
             // State variables
-            const APP_VERSION = "1.7";
+            const APP_VERSION = "1.2";
             const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
             const WHISPER_API_ENDPOINT = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
             let recognition;
@@ -290,22 +290,113 @@
                 updateStorageUsage();
             };
 
-            const migrateFromLocalStorage = async () => { /* ... (same as before) ... */ };
-            const renderUI = () => { renderPromptTemplates(); renderFolders(); renderRecords(records.filter(r => !r.folderId), recentHistory); };
-            const loadDataFromDB = async () => { /* ... (same as before) ... */ };
-            const setupDefaultTemplates = async () => { /* ... (same as before) ... */ };
-            const resetData = async () => { /* ... (same as before) ... */ };
+            const migrateFromLocalStorage = async () => {
+                const oldRecords = localStorage.getItem('records');
+                if (oldRecords) {
+                    try {
+                        const parsedRecords = JSON.parse(oldRecords);
+                        for (const record of parsedRecords) { const newRecord = { ...record, audioBlob: null, folderId: record.folderId || null }; await saveData('records', newRecord); }
+                        localStorage.clear();
+                        showMessageModal('データ引継ぎ完了', '以前のバージョンのデータを新しい保管場所に移動しました。');
+                    } catch (e) { console.error("Data migration failed:", e); }
+                }
+            };
             
+            const renderUI = () => { renderPromptTemplates(); renderFolders(); renderRecords(records.filter(r => !r.folderId), recentHistory); };
+            const loadDataFromDB = async () => {
+                records = await getAllData('records');
+                records.sort((a, b) => new Date(b.date) - new Date(a.date));
+                folders = await getAllData('folders');
+                const settings = await getAllData('settings');
+                const promptsSetting = settings.find(s => s.key === 'promptTemplates');
+                promptTemplates = promptsSetting ? promptsSetting.value : [];
+                const geminiKeySetting = settings.find(s => s.key === 'geminiApiKey');
+                geminiApiKey = geminiKeySetting ? geminiKeySetting.value : '';
+                geminiApiKeyInput.value = geminiApiKey;
+                const hfKeySetting = settings.find(s => s.key === 'huggingFaceApiKey');
+                huggingFaceApiKey = hfKeySetting ? hfKeySetting.value : '';
+                huggingFaceApiKeyInput.value = huggingFaceApiKey;
+                await setupDefaultTemplates();
+            };
+            
+            const setupDefaultTemplates = async () => {
+                const defaultTemplates = [ { title: '議事録風', text: '会議の決定事項、課題、タスクを箇条書きでまとめてください。' }, { title: '簡潔な概要', text: '打ち合わせの要点を3行以内で簡潔にまとめてください。' }, { title: '話者識別＋議事録要約', text: 'あなたは優秀な議事録作成アシスタントです。以下の会議の書き起こしテキストを分析し、まず会話の流れから話者を「話者A」「話者B」のように特定し、誰が何を話したかが明確にわかるように会話形式で整理してください。その後、会議全体の要約、決定事項、そして今後のToDo（担当者を含む）をそれぞれ箇条書きでまとめてください。' } ];
+                let updated = false;
+                defaultTemplates.forEach(dt => { if (!promptTemplates.some(pt => pt.title === dt.title)) { promptTemplates.push(dt); updated = true; } });
+                if (updated) await saveData('settings', {key: 'promptTemplates', value: promptTemplates});
+            };
+
+            const resetData = async () => {
+                if(confirm('全ての記録、フォルダ、設定を削除します。よろしいですか？')) {
+                    await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('records').clear();
+                    await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('folders').clear();
+                    await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('settings').clear();
+                    records = []; folders = []; promptTemplates = []; geminiApiKey = ''; huggingFaceApiKey = '';
+                    await initializeApp();
+                    showMessageModal('初期化完了', '全てのデータを初期化しました。');
+                }
+            };
+
             // --- UI & View Management ---
-            const showView = (view) => { /* ... (same as before) ... */ };
-            const showMessageModal = (title, message) => { /* ... (same as before) ... */ };
-            const formatBytes = (bytes, decimals = 2) => { /* ... (same as before) ... */ };
-            const updateStorageUsage = async () => { /* ... (same as before) ... */ };
-            const renderFolders = () => { /* ... (same as before) ... */ };
-            const renderRecords = (recordsToRender, parentElement) => { /* ... (same as before) ... */ };
-            const selectRecord = (recordId) => { /* ... (same as before) ... */ };
-            const deselectAll = (renderHome = true) => { /* ... (same as before) ... */ };
-            const renderPromptTemplates = () => { /* ... (same as before) ... */ };
+            const showView = (view) => {
+                recentHistory.classList.add('hidden'); transcriptContainer.classList.add('hidden'); summaryContainer.classList.add('hidden');
+                if (view === 'recent') recentHistory.classList.remove('hidden'); else if (view === 'transcript') transcriptContainer.classList.remove('hidden'); else if (view === 'summary') summaryContainer.classList.remove('hidden');
+            };
+            const showMessageModal = (title, message) => { modalTitle.textContent = title; modalMessage.textContent = message; messageModal.classList.remove('hidden'); messageModal.classList.add('flex'); };
+            const formatBytes = (bytes, decimals = 2) => { if (!bytes || bytes === 0) return ''; const k = 1024, dm = decimals < 0 ? 0 : decimals, sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; };
+            const updateStorageUsage = async () => { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); storageUsageEl.innerHTML = `<div class="font-bold">ストレージ使用量</div><div>${formatBytes(e.usage)} / ${formatBytes(e.quota)}</div>`; } };
+            const renderFolders = () => {
+                folderList.innerHTML = '';
+                folders.forEach(folder => {
+                    const folderItem = document.createElement('li');
+                    folderItem.className = 'p-2 rounded-lg hover:bg-gray-700 cursor-pointer flex items-center space-x-2 folder-item';
+                    folderItem.dataset.id = folder.id;
+                    folderItem.innerHTML = `<span class="text-blue-400">📁</span> <span class="truncate">${folder.name}</span>`;
+                    folderItem.addEventListener('click', () => { const folderRecords = records.filter(r => r.folderId === folder.id); contentTitle.textContent = `フォルダ: ${folder.name}`; renderRecords(folderRecords, recentHistory); showView('recent'); deselectAll(false); });
+                    folderItem.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showContextMenu(e, folder.id, 'folder'); });
+                    folderItem.addEventListener('dragover', (e) => { e.preventDefault(); folderItem.classList.add('drop-hover'); });
+                    folderItem.addEventListener('dragleave', () => folderItem.classList.remove('drop-hover'));
+                    folderItem.addEventListener('drop', async (e) => { e.preventDefault(); folderItem.classList.remove('drop-hover'); const recordId = e.dataTransfer.getData('text/plain'); const recordToMove = records.find(r => r.id === recordId); if(recordToMove) { recordToMove.folderId = folder.id; await saveData('records', recordToMove); showMessageModal('移動完了', `「${recordToMove.title}」を「${folder.name}」フォルダに移動しました。`); deselectAll(); } });
+                    folderList.appendChild(folderItem);
+                });
+            };
+            const renderRecords = (recordsToRender, parentElement) => {
+                parentElement.innerHTML = '';
+                recordsToRender.forEach(record => {
+                    const recordItem = document.createElement('div');
+                    recordItem.className = 'p-4 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer record-item';
+                    recordItem.dataset.id = record.id;
+                    recordItem.draggable = true;
+                    const fileSize = record.audioBlob ? formatBytes(record.audioBlob.size) : '';
+                    recordItem.innerHTML = `<div class="flex justify-between items-start"><div class="flex-grow min-w-0"><h3 class="font-bold truncate">${record.title}</h3><p class="text-gray-400 text-sm">${new Date(record.date).toLocaleString('ja-JP')}</p></div><div class="text-xs text-gray-400 flex-shrink-0 ml-2">${fileSize}</div></div>`;
+                    if (selectedRecord && selectedRecord.id === record.id) recordItem.classList.add('selected');
+                    recordItem.addEventListener('click', () => selectRecord(record.id));
+                    recordItem.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showContextMenu(e, record.id, 'record'); });
+                    recordItem.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', record.id); recordItem.classList.add('is-dragging'); });
+                    recordItem.addEventListener('dragend', () => recordItem.classList.remove('is-dragging'));
+                    parentElement.appendChild(recordItem);
+                });
+            };
+            const selectRecord = (recordId) => {
+                selectedRecord = records.find(r => r.id === recordId);
+                document.querySelectorAll('.record-item').forEach(el => el.classList.toggle('selected', el.dataset.id === recordId));
+                if (selectedRecord) {
+                    contentTitle.textContent = `記録: ${selectedRecord.title}`;
+                    transcriptContainer.innerHTML = `<pre class="whitespace-pre-wrap text-sm">${selectedRecord.transcript}</pre>`;
+                    showView('transcript');
+                    rightPanelContent.innerHTML = '';
+                    rightPanelDisplay.classList.remove('hidden');
+                    if(selectedRecord.audioBlob) { const audioURL = URL.createObjectURL(selectedRecord.audioBlob); const audioPlayer = document.createElement('div'); audioPlayer.innerHTML = `<h4 class="font-bold text-lg mb-2 text-gray-300">録音音声</h4><audio controls src="${audioURL}"></audio>`; rightPanelContent.appendChild(audioPlayer); }
+                    if (selectedRecord.summary) { const summaryEl = document.createElement('div'); summaryEl.innerHTML = `<h4 class="font-bold text-lg mt-4 mb-2 text-gray-300">要約結果</h4><pre class="whitespace-pre-wrap">${selectedRecord.summary}</pre>`; rightPanelContent.appendChild(summaryEl); }
+                    summarizeButton.disabled = false;
+                }
+            };
+            const deselectAll = (renderHome = true) => {
+                selectedRecord = null; document.querySelectorAll('.record-item.selected').forEach(el => el.classList.remove('selected'));
+                summarizeButton.disabled = true; rightPanelDisplay.classList.add('hidden');
+                if (renderHome) { contentTitle.textContent = '最近の記録履歴'; showView('recent'); renderRecords(records.filter(r => !r.folderId), recentHistory); }
+            };
+            const renderPromptTemplates = () => { promptTemplatesContainer.innerHTML = ''; promptTemplates.forEach((template) => { const item = document.createElement('div'); item.className = 'bg-gray-700 rounded-lg p-4'; item.innerHTML = `<h5 class="font-semibold mb-2">${template.title}</h5><p class="text-sm text-gray-400">${template.text}</p>`; promptTemplatesContainer.appendChild(item); }); };
             
             // --- Speech Recognition & Audio Recording ---
             const setupRecognition = () => {
@@ -313,12 +404,10 @@
                 if (!SpeechRecognition) { showMessageModal('エラー', 'Web Speech APIに対応していません。'); return; }
                 recognition = new SpeechRecognition();
                 recognition.lang = 'ja-JP'; 
-                recognition.continuous = false; // Use single result mode for cross-platform compatibility
+                recognition.continuous = false; 
                 recognition.interimResults = true; 
                 
                 recognition.onstart = () => {
-                    console.log("onstart fired");
-                    // This UI change only happens on the very first start when `isRecording` is true
                     if(isRecording) {
                         recordButton.textContent = '録音を停止'; 
                         recordButton.classList.replace('bg-blue-600', 'bg-red-600');
@@ -330,18 +419,14 @@
                 };
                 
                 recognition.onend = () => { 
-                    console.log("onend fired");
-                    if (isRecording) { // If it's an intended continuous recording, restart it
-                        recognition.start(); 
-                    }
+                    if (isRecording) { recognition.start(); }
                 };
                 
                 recognition.onresult = (event) => {
-                    console.log("onresult event fired!", event); // For debugging
                     let interimTranscript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript + ' ';
+                            finalTranscript += event.results[i][0].transcript;
                         } else {
                             interimTranscript += event.results[i][0].transcript;
                         }
@@ -350,7 +435,6 @@
                 };
                 
                 recognition.onerror = (event) => { 
-                    console.error("onerror fired", event);
                     if (event.error !== 'no-speech' && event.error !== 'audio-capture' && isRecording) {
                         showMessageModal('エラー', `音声認識エラー: ${event.error}`);
                         stopRecording(false);
@@ -380,8 +464,7 @@
 
             const stopRecording = (saveText = true) => {
                 if (!isRecording) return;
-                isRecording = false; // Set flag first to prevent auto-restart
-                recognition.stop();
+                isRecording = false; recognition.stop();
                 
                 clearInterval(recordingTimerInterval);
                 timerDisplay.classList.add('hidden');
@@ -399,11 +482,49 @@
                 if(mediaRecorder && mediaRecorder.state === "recording") { mediaRecorder.onstop = handleStop; mediaRecorder.stop(); } else { handleStop(); }
             };
 
-            const transcribeFile = async (file) => { /* ... (same as before) ... */ };
-            const executeSummary = async (template) => { /* ... (same as before) ... */ };
-            const showContextMenu = (e, id, type) => { /* ... (same as before) ... */ };
+            const transcribeFile = async (file) => {
+                if (!file) return;
+                if (!huggingFaceApiKey) { showMessageModal('APIキー未設定', 'ファイル文字起こし機能には、設定画面でHugging Face APIキーを入力してください。'); return; }
+                contentTitle.textContent = 'ファイルを処理中...';
+                transcriptContainer.innerHTML = '<p>AIが文字起こしをしています...（ファイルサイズによって時間がかかる場合があります）</p>';
+                showView('transcript'); deselectAll(false);
+                try {
+                    const response = await fetch(WHISPER_API_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${huggingFaceApiKey}` }, body: file });
+                    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'APIエラーが発生しました。'); }
+                    const result = await response.json();
+                    const transcript = result.text.trim();
+                    const title = prompt('記録のタイトルを入力してください:', file.name.replace(/\.[^/.]+$/, ""));
+                    const newRecord = { id: crypto.randomUUID(), title: title || '無題の記録', date: new Date().toISOString(), transcript: transcript, summary: null, folderId: null, audioBlob: file };
+                    await saveData('records', newRecord);
+                    records.unshift(newRecord);
+                    showMessageModal('完了', 'ファイルからの文字起こしが完了しました。');
+                    deselectAll();
+                    await updateStorageUsage();
+                } catch (error) { showMessageModal('エラー', `文字起こしに失敗しました: ${error.message}`); deselectAll(); }
+                finally { audioUpload.value = ''; }
+            };
             
-            // --- Attach Event Listeners ---
+            const executeSummary = async (template) => {
+                rightPanelDisplay.classList.remove('hidden'); let rightPanelHTML = '';
+                if(selectedRecord.audioBlob) { const audioURL = URL.createObjectURL(selectedRecord.audioBlob); rightPanelHTML += `<div><h4 class="font-bold text-lg mb-2 text-gray-300">録音音声</h4><audio controls src="${audioURL}"></audio></div>`; }
+                rightPanelHTML += `<div><h4 class="font-bold text-lg mt-4 mb-2 text-gray-300">元の文字起こし</h4><pre class="whitespace-pre-wrap">${selectedRecord.transcript}</pre></div>`;
+                rightPanelContent.innerHTML = rightPanelHTML;
+                contentTitle.textContent = '要約結果'; showView('summary'); summaryContainer.innerHTML = '<p>AIが要約を生成中です...</p>';
+                try {
+                    const response = await fetch(GEMINI_API_ENDPOINT + `?key=${geminiApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: `${template.text}\n\n# 文字起こしテキスト:\n\n---\n\n${selectedRecord.transcript}` }] }] }) });
+                    if (!response.ok) throw await response.json();
+                    const data = await response.json(); const summary = data?.candidates?.[0]?.content?.parts?.[0]?.text || '要約に失敗しました。';
+                    summaryContainer.innerHTML = `<pre class="whitespace-pre-wrap text-sm">${summary}</pre>`; selectedRecord.summary = summary; await saveData('records', selectedRecord);
+                } catch(error) { const errorMessage = error?.error?.message || error.toString(); summaryContainer.innerHTML = `<p class="text-red-400">要約中にエラーが発生しました: ${errorMessage}</p>`; showMessageModal('APIエラー', `要約中にエラーが発生しました: ${errorMessage}`); }
+            };
+
+            const showContextMenu = (e, id, type) => {
+                contextMenu.style.left = `${e.clientX}px`; contextMenu.style.top = `${e.clientY}px`; contextMenu.classList.remove('hidden');
+                contextMenu.dataset.id = id; contextMenu.dataset.type = type;
+                const hasAudio = type === 'record' ? records.find(r => r.id === id)?.audioBlob : false;
+                contextDeleteAudio.style.display = hasAudio ? 'block' : 'none';
+            };
+            
             const attachAllEventListeners = () => {
                 homeButton.addEventListener('click', deselectAll);
                 recordButton.addEventListener('click', () => { if (isRecording) { stopRecording(); } else { titleModal.classList.remove('hidden'); titleModal.classList.add('flex'); recordTitleInput.value = `記録 - ${new Date().toLocaleString('ja-JP')}`; } });
