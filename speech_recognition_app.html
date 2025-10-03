@@ -406,13 +406,15 @@
                 recognition.onend = () => { if (isRecording) { console.log("Speech recognition stopped, restarting..."); recognition.start(); } };
                 recognition.onresult = (event) => {
                     let interimTranscript = '';
+                    let finalTranscriptChunk = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            currentTranscript += event.results[i][0].transcript + ' ';
+                            finalTranscriptChunk += event.results[i][0].transcript;
                         } else {
                             interimTranscript += event.results[i][0].transcript;
                         }
                     }
+                    currentTranscript += finalTranscriptChunk; // Append only final results
                     transcriptContainer.innerHTML = `<p>${currentTranscript}${interimTranscript}</p>`;
                 };
                 recognition.onerror = (event) => { showMessageModal('エラー', `音声認識エラー: ${event.error}`); if(isRecording) stopRecording(false); };
