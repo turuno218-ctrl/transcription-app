@@ -25,9 +25,6 @@
         .main-content {
             flex-grow: 1;
         }
-        .right-panel {
-            width: 25rem;
-        }
         .text-area {
             min-height: 200px;
             height: 100%;
@@ -54,10 +51,10 @@
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 flex min-h-screen">
-    <div class="container mx-auto max-w-7xl flex-grow flex rounded-xl shadow-lg overflow-hidden my-4">
+    <div class="container mx-auto max-w-7xl flex-grow flex flex-col md:flex-row shadow-lg md:rounded-xl md:my-4 overflow-hidden">
 
         <!-- 左カラム: 履歴管理とナビゲーション -->
-        <aside class="w-64 bg-gray-800 p-4 flex flex-col space-y-4 border-r border-gray-700 flex-shrink-0">
+        <aside class="w-full md:w-64 bg-gray-800 p-4 flex flex-col space-y-4 border-b md:border-r md:border-b-0 border-gray-700 flex-shrink-0">
             <div class="flex items-center justify-center mb-6">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5z"/>
@@ -93,7 +90,7 @@
         </aside>
 
         <!-- 中央カラム: メインコンテンツ -->
-        <main class="flex-grow main-content flex flex-col p-6 bg-gray-800 border-r border-gray-700 min-w-0">
+        <main class="flex-grow main-content flex flex-col p-6 bg-gray-800 border-b md:border-r md:border-b-0 border-gray-700 min-w-0">
             <div id="content-display" class="flex-grow flex flex-col">
                 <h2 id="content-title" class="text-xl font-bold mb-4">最近の記録履歴</h2>
                 <div id="recent-history" class="space-y-4 flex-grow overflow-y-auto" data-id="root" data-type="folder">
@@ -113,7 +110,7 @@
         </main>
 
         <!-- 右カラム: コントロールパネル -->
-        <div id="right-panel" class="right-panel bg-gray-800 p-6 flex flex-col space-y-6 flex-shrink-0">
+        <div id="right-panel" class="w-full md:w-[25rem] bg-gray-800 p-6 flex flex-col space-y-6 flex-shrink-0">
             <div id="timer-display" class="hidden text-center text-4xl font-mono text-gray-300 py-4 mb-4 bg-gray-700 rounded-lg">
                 00:00:00
             </div>
@@ -411,7 +408,7 @@
                     let interimTranscript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            currentTranscript += event.results[i][0].transcript;
+                            currentTranscript += event.results[i][0].transcript + ' ';
                         } else {
                             interimTranscript += event.results[i][0].transcript;
                         }
