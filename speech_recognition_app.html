@@ -250,7 +250,7 @@
             const confirmDeleteButton = document.getElementById('confirm-delete-button');
 
             // State variables
-            const APP_VERSION = "1.2";
+            const APP_VERSION = "1.3";
             const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
             const WHISPER_API_ENDPOINT = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
             let recognition;
@@ -404,14 +404,15 @@
                 if (!SpeechRecognition) { showMessageModal('エラー', 'Web Speech APIに対応していません。'); return; }
                 recognition = new SpeechRecognition();
                 recognition.lang = 'ja-JP'; 
-                recognition.continuous = false; 
+                recognition.continuous = false; // <<< ANDROID FIX
                 recognition.interimResults = true; 
                 
                 recognition.onstart = () => {
+                    // Only change UI on the very first start when isRecording is set
                     if(isRecording) {
                         recordButton.textContent = '録音を停止'; 
                         recordButton.classList.replace('bg-blue-600', 'bg-red-600');
-                        deselectAll(); 
+                        deselectAll(false); 
                         contentTitle.textContent = 'リアルタイム文字起こし';
                         transcriptContainer.innerHTML = ''; 
                         showView('transcript');
