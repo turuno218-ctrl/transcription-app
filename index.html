@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文字起こしアプリ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 4px;
+        }
+        .main-content {
+            flex-grow: 1;
+        }
+        .right-panel {
+            width: 25rem;
+        }
+        .text-area {
+            min-height: 200px;
+            height: 100%;
+            resize: none;
+        }
+        .record-item.selected {
+            border: 2px solid #3b82f6;
+            background-color: #374151;
+        }
+        .folder-item.drop-hover {
+            background-color: #3b82f6; /* blue-500 */
+        }
+        .record-item.is-dragging {
+            opacity: 0.5;
+        }
+        audio {
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex min-h-screen">
+    <div class="container mx-auto max-w-7xl flex-grow flex rounded-xl shadow-lg overflow-hidden my-4">
+
+        <!-- 左カラム: 履歴管理とナビゲーション -->
+        <aside class="w-64 bg-gray-800 p-4 flex flex-col space-y-4 border-r border-gray-700">
+            <div class="flex items-center justify-center mb-6">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5z"/>
+                    <path d="M12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                </svg>
+            </div>
+            
+            <button id="home-button" class="flex items-center space-x-2 p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                </svg>
+                <span>ホーム</span>
+            </button>
+            
+            <div class="relative w-full">
+                <input type="text" placeholder="記録を検索..." class="w-full p-2 pl-10 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            
+            <div class="flex-grow overflow-y-auto space-y-2">
+                <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mt-4">フォルダ</h3>
+                <ul id="folder-list" class="space-y-1">
+                    <!-- フォルダはJavaScriptで動的に追加 -->
+                </ul>
+                <button id="add-folder-button" class="w-full text-blue-400 text-sm mt-2 hover:underline">新しいフォルダを作成</button>
+            </div>
+
+            <div id="storage-usage" class="text-xs text-gray-400 mt-auto p-2 border-t border-gray-700">
+                <!-- ストレージ使用量がここに表示される -->
+            </div>
+        </aside>
+
+        <!-- 中央カラム: メインコンテンツ -->
+        <main class="flex-grow main-content flex flex-col p-6 bg-gray-800 border-r border-gray-700 min-w-0">
+            <div id="content-display" class="flex-grow flex flex-col">
+                <h2 id="content-title" class="text-xl font-bold mb-4">最近の記録履歴</h2>
+                <div id="recent-history" class="space-y-4 flex-grow overflow-y-auto" data-id="root" data-type="folder">
+                    <!-- 記録はJavaScriptで動的に追加 -->
+                </div>
+                
+                <!-- 文字起こしコンテナ -->
+                <div id="transcript-container" class="hidden flex-grow flex flex-col p-4 bg-gray-700 rounded-lg overflow-y-auto space-y-4">
+                     <!-- This will be populated by JS -->
+                </div>
+
+                <!-- 要約コンテナ -->
+                 <div id="summary-container" class="hidden flex-grow flex flex-col p-4 bg-gray-700 rounded-lg overflow-y-auto">
+                    <!-- This will be populated by JS for prompt selection or summary result -->
+                </div>
+            </div>
+        </main>
+
+        <!-- 右カラム: コントロールパネル -->
+        <div id="right-panel" class="right-panel bg-gray-800 p-6 flex flex-col space-y-6">
+            <div id="timer-display" class="hidden text-center text-4xl font-mono text-gray-300 py-4 mb-4 bg-gray-700 rounded-lg">
+                00:00:00
+            </div>
+            <div id="control-buttons" class="flex flex-col space-y-4">
+                <button id="record-button" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-full shadow-lg transform hover:scale-105 transition-transform duration-200">
+                    録音を開始
+                </button>
+                <button id="summarize-button" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-full shadow-lg transform hover:scale-105 transition-transform duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    要約を開始
+                </button>
+                <label for="audio-upload" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-full shadow-lg transform hover:scale-105 transition-transform duration-200 cursor-pointer text-center">
+                    ファイルから文字起こし
+                </label>
+                <input type="file" id="audio-upload" accept="audio/*" class="hidden">
+                <button id="settings-button" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 rounded-full shadow-lg transform hover:scale-105 transition-transform duration-200">
+                    設定
+                </button>
+            </div>
+            <!-- 右カラム表示エリア -->
+            <div id="right-panel-display" class="flex-grow bg-gray-700 rounded-lg p-4 overflow-y-auto hidden">
+                <div id="right-panel-content" class="text-sm leading-relaxed whitespace-pre-wrap space-y-4">
+                    <!-- 音声プレーヤー or 要約結果がここに表示される -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 記録タイトル入力モーダル -->
+    <div id="title-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-sm w-full">
+            <h3 class="text-lg font-bold mb-4">記録タイトルを入力</h3>
+            <input type="text" id="record-title-input" class="w-full bg-gray-700 text-gray-100 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例：新製品企画会議">
+            <div class="flex justify-end space-x-4 mt-4">
+                <button id="cancel-recording-button" class="bg-gray-600 hover:bg-gray-500 text-white font-medium py-2 px-4 rounded-lg">キャンセル</button>
+                <button id="start-recording-button" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg">録音を開始</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 設定モーダル -->
+    <div id="settings-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-2xl w-full flex flex-col max-h-[90vh]">
+            <h3 class="text-lg font-bold mb-4">設定</h3>
+            <div class="space-y-6 overflow-y-auto pr-2">
+                <div>
+                    <h4 class="font-bold text-gray-300 mb-2">AI API設定</h4>
+                    <p class="text-sm text-gray-400 mb-2">Gemini APIキー (要約機能用)</p>
+                    <input type="password" id="gemini-api-key" class="w-full bg-gray-700 text-gray-100 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="APIキー">
+                
+                    <p class="text-sm text-gray-400 mt-4 mb-2">Hugging Face APIキー (ファイル文字起こし用)</p>
+                    <input type="password" id="huggingface-api-key" class="w-full bg-gray-700 text-gray-100 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="APIキー">
+                </div>
+                <div class="space-y-4">
+                    <h4 class="font-bold text-gray-300 mb-2">要約プロンプトのテンプレート</h4>
+                    <p class="text-sm text-gray-400 mb-2">要約の目的に応じて、プロンプトをカスタマイズできます。</p>
+                    <div id="prompt-templates" class="space-y-4">
+                        <!-- Templates are rendered here by JS -->
+                    </div>
+                    <button id="add-template-button" class="text-blue-400 text-sm hover:underline mt-2">新しいテンプレートを作成</button>
+                </div>
+                <div>
+                    <h4 class="font-bold text-gray-300 mb-2">データ管理</h4>
+                    <p class="text-sm text-gray-400 mb-2">すべての記録履歴とフォルダを削除します。</p>
+                    <button id="clear-data-button" class="bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-4 rounded-lg">初期化</button>
+                </div>
+            </div>
+            <div class="flex justify-end mt-6 pt-4 border-t border-gray-700">
+                <button id="close-settings-button" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 削除確認モーダル -->
+    <div id="delete-confirm-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-sm w-full">
+            <h3 class="text-lg font-bold mb-4">削除確認</h3>
+            <p id="delete-confirm-message" class="text-gray-300 mb-4"></p>
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-delete-button" class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-2 px-4 rounded-lg">キャンセル</button>
+                <button id="confirm-delete-button" class="bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-4 rounded-lg">削除</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- メッセージモーダル -->
+    <div id="message-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-sm w-full">
+            <h3 id="modal-title" class="text-lg font-bold mb-4"></h3>
+            <p id="modal-message" class="text-gray-300 mb-4"></p>
+            <div class="flex justify-end space-x-4">
+                <button id="close-modal-button" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- コンテキストメニュー -->
+    <div id="context-menu" class="fixed z-50 bg-gray-700 rounded-lg shadow-lg py-1 hidden">
+        <button id="context-rename" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-600">名前を変更</button>
+        <button id="context-delete-audio" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-600">音声ファイルのみ削除</button>
+        <button id="context-delete" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-600">削除</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const homeButton = document.getElementById('home-button');
+            const contentTitle = document.getElementById('content-title');
+            const recentHistory = document.getElementById('recent-history');
+            const transcriptContainer = document.getElementById('transcript-container');
+            const summaryContainer = document.getElementById('summary-container');
+            const recordButton = document.getElementById('record-button');
+            const summarizeButton = document.getElementById('summarize-button');
+            const settingsButton = document.getElementById('settings-button');
+            const rightPanelDisplay = document.getElementById('right-panel-display');
+            const rightPanelContent = document.getElementById('right-panel-content');
+            const audioUpload = document.getElementById('audio-upload');
+            const addFolderButton = document.getElementById('add-folder-button');
+            const folderList = document.getElementById('folder-list');
+            const contextMenu = document.getElementById('context-menu');
+            const contextRename = document.getElementById('context-rename');
+            const contextDelete = document.getElementById('context-delete');
+            const contextDeleteAudio = document.getElementById('context-delete-audio');
+            const storageUsageEl = document.getElementById('storage-usage');
+            const timerDisplay = document.getElementById('timer-display');
+            
+            // Modals
+            const titleModal = document.getElementById('title-modal');
+            const recordTitleInput = document.getElementById('record-title-input');
+            const startRecordingButton = document.getElementById('start-recording-button');
+            const cancelRecordingButton = document.getElementById('cancel-recording-button');
+            const settingsModal = document.getElementById('settings-modal');
+            const closeSettingsButton = document.getElementById('close-settings-button');
+            const geminiApiKeyInput = document.getElementById('gemini-api-key');
+            const huggingFaceApiKeyInput = document.getElementById('huggingface-api-key');
+            const promptTemplatesContainer = document.getElementById('prompt-templates');
+            const addTemplateButton = document.getElementById('add-template-button');
+            const clearDataButton = document.getElementById('clear-data-button');
+            const messageModal = document.getElementById('message-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMessage = document.getElementById('modal-message');
+            const closeModalButton = document.getElementById('close-modal-button');
+            const deleteConfirmModal = document.getElementById('delete-confirm-modal');
+            const deleteConfirmMessage = document.getElementById('delete-confirm-message');
+            const cancelDeleteButton = document.getElementById('cancel-delete-button');
+            const confirmDeleteButton = document.getElementById('confirm-delete-button');
+
+            // State variables
+            const GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
+            const WHISPER_API_ENDPOINT = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
+            let recognition;
+            let mediaRecorder;
+            let audioChunks = [];
+            let localStream;
+            let currentTranscript = '';
+            let isRecording = false;
+            let selectedRecord = null;
+            let db;
+            let recordingTimerInterval;
+            let recordingStartTime;
+            
+            // Data
+            let promptTemplates = [];
+            let folders = [];
+            let geminiApiKey = '';
+            let huggingFaceApiKey = '';
+            let records = [];
+
+            // --- IndexedDB Database ---
+            const DB_NAME = 'TranscriptionAppDB', DB_VERSION = 1;
+            const initDB = () => new Promise((resolve, reject) => { const r = indexedDB.open(DB_NAME, DB_VERSION); r.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains('records')) d.createObjectStore('records', { keyPath: 'id' }); if (!d.objectStoreNames.contains('folders')) d.createObjectStore('folders', { keyPath: 'id' }); if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', { keyPath: 'key' }); }; r.onsuccess = e => { db = e.target.result; resolve(db); }; r.onerror = e => reject(e.target.error); });
+            const saveData = (s, d) => new Promise((resolve, reject) => { if (!db) return reject("DB not init"); const t = db.transaction(s, 'readwrite'); t.objectStore(s).put(d); t.oncomplete = () => resolve(); t.onerror = e => reject(e.target.error); });
+            const getAllData = (s) => new Promise((resolve, reject) => { if (!db) return reject("DB not init"); const r = db.transaction(s, 'readonly').objectStore(s).getAll(); r.onsuccess = e => resolve(e.target.result); r.onerror = e => reject(e.target.error); });
+            const deleteData = (s, i) => new Promise((resolve, reject) => { if (!db) return reject("DB not init"); const t = db.transaction(s, 'readwrite'); t.objectStore(s).delete(i); t.oncomplete = () => resolve(); t.onerror = e => reject(e.target.error); });
+
+            // --- Initialization ---
+            const initializeApp = async () => {
+                await initDB();
+                await migrateFromLocalStorage();
+                await loadDataFromDB();
+                attachAllEventListeners();
+                renderUI();
+                setupRecognition();
+                updateStorageUsage();
+            };
+
+            const migrateFromLocalStorage = async () => {
+                const oldRecords = localStorage.getItem('records');
+                if (oldRecords) {
+                    try {
+                        const parsedRecords = JSON.parse(oldRecords);
+                        for (const record of parsedRecords) { const newRecord = { ...record, audioBlob: null, folderId: record.folderId || null }; await saveData('records', newRecord); }
+                        localStorage.clear();
+                        showMessageModal('データ引継ぎ完了', '以前のバージョンのデータを新しい保管場所に移動しました。');
+                    } catch (e) { console.error("Data migration failed:", e); }
+                }
+            };
+            
+            const renderUI = () => { renderPromptTemplates(); renderFolders(); renderRecords(records.filter(r => !r.folderId), recentHistory); };
+            const loadDataFromDB = async () => {
+                records = await getAllData('records');
+                records.sort((a, b) => new Date(b.date) - new Date(a.date));
+                folders = await getAllData('folders');
+                const settings = await getAllData('settings');
+                const promptsSetting = settings.find(s => s.key === 'promptTemplates');
+                promptTemplates = promptsSetting ? promptsSetting.value : [];
+                const geminiKeySetting = settings.find(s => s.key === 'geminiApiKey');
+                geminiApiKey = geminiKeySetting ? geminiKeySetting.value : '';
+                geminiApiKeyInput.value = geminiApiKey;
+                const hfKeySetting = settings.find(s => s.key === 'huggingFaceApiKey');
+                huggingFaceApiKey = hfKeySetting ? hfKeySetting.value : '';
+                huggingFaceApiKeyInput.value = huggingFaceApiKey;
+                await setupDefaultTemplates();
+            };
+            
+            const setupDefaultTemplates = async () => {
+                const defaultTemplates = [ { title: '議事録風', text: '会議の決定事項、課題、タスクを箇条書きでまとめてください。' }, { title: '簡潔な概要', text: '打ち合わせの要点を3行以内で簡潔にまとめてください。' }, { title: '話者識別＋議事録要約', text: 'あなたは優秀な議事録作成アシスタントです。以下の会議の書き起こしテキストを分析し、まず会話の流れから話者を「話者A」「話者B」のように特定し、誰が何を話したかが明確にわかるように会話形式で整理してください。その後、会議全体の要約、決定事項、そして今後のToDo（担当者を含む）をそれぞれ箇条書きでまとめてください。' } ];
+                let updated = false;
+                defaultTemplates.forEach(dt => { if (!promptTemplates.some(pt => pt.title === dt.title)) { promptTemplates.push(dt); updated = true; } });
+                if (updated) await saveData('settings', {key: 'promptTemplates', value: promptTemplates});
+            };
+
+            const resetData = async () => {
+                await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('records').clear();
+                await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('folders').clear();
+                await db.transaction(['records', 'folders', 'settings'], 'readwrite').objectStore('settings').clear();
+                records = []; folders = []; promptTemplates = []; geminiApiKey = ''; huggingFaceApiKey = '';
+                await initializeApp();
+                showMessageModal('初期化完了', '全てのデータを初期化しました。');
+            };
+
+            // --- UI & View Management ---
+            const showView = (view) => {
+                recentHistory.classList.add('hidden'); transcriptContainer.classList.add('hidden'); summaryContainer.classList.add('hidden');
+                if (view === 'recent') recentHistory.classList.remove('hidden'); else if (view === 'transcript') transcriptContainer.classList.remove('hidden'); else if (view === 'summary') summaryContainer.classList.remove('hidden');
+            };
+            const showMessageModal = (title, message) => { modalTitle.textContent = title; modalMessage.textContent = message; messageModal.classList.remove('hidden'); messageModal.classList.add('flex'); };
+            const formatBytes = (bytes, decimals = 2) => { if (!bytes || bytes === 0) return ''; const k = 1024, dm = decimals < 0 ? 0 : decimals, sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; };
+            const updateStorageUsage = async () => { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); storageUsageEl.innerHTML = `<div class="font-bold">ストレージ使用量</div><div>${formatBytes(e.usage)} / ${formatBytes(e.quota)}</div>`; } };
+            const renderFolders = () => {
+                folderList.innerHTML = '';
+                folders.forEach(folder => {
+                    const folderItem = document.createElement('li');
+                    folderItem.className = 'p-2 rounded-lg hover:bg-gray-700 cursor-pointer flex items-center space-x-2 folder-item';
+                    folderItem.dataset.id = folder.id;
+                    folderItem.innerHTML = `<span class="text-blue-400">📁</span> <span class="truncate">${folder.name}</span>`;
+                    folderItem.addEventListener('click', () => { const folderRecords = records.filter(r => r.folderId === folder.id); contentTitle.textContent = `フォルダ: ${folder.name}`; renderRecords(folderRecords, recentHistory); showView('recent'); deselectAll(false); });
+                    folderItem.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showContextMenu(e, folder.id, 'folder'); });
+                    folderItem.addEventListener('dragover', (e) => { e.preventDefault(); folderItem.classList.add('drop-hover'); });
+                    folderItem.addEventListener('dragleave', () => folderItem.classList.remove('drop-hover'));
+                    folderItem.addEventListener('drop', async (e) => { e.preventDefault(); folderItem.classList.remove('drop-hover'); const recordId = e.dataTransfer.getData('text/plain'); const recordToMove = records.find(r => r.id === recordId); if(recordToMove) { recordToMove.folderId = folder.id; await saveData('records', recordToMove); showMessageModal('移動完了', `「${recordToMove.title}」を「${folder.name}」フォルダに移動しました。`); deselectAll(); } });
+                    folderList.appendChild(folderItem);
+                });
+            };
+            const renderRecords = (recordsToRender, parentElement) => {
+                parentElement.innerHTML = '';
+                recordsToRender.forEach(record => {
+                    const recordItem = document.createElement('div');
+                    recordItem.className = 'p-4 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer record-item';
+                    recordItem.dataset.id = record.id;
+                    recordItem.draggable = true;
+                    const fileSize = record.audioBlob ? formatBytes(record.audioBlob.size) : '';
+                    recordItem.innerHTML = `<div class="flex justify-between items-start"><div class="flex-grow min-w-0"><h3 class="font-bold truncate">${record.title}</h3><p class="text-gray-400 text-sm">${new Date(record.date).toLocaleString('ja-JP')}</p></div><div class="text-xs text-gray-400 flex-shrink-0 ml-2">${fileSize}</div></div>`;
+                    if (selectedRecord && selectedRecord.id === record.id) recordItem.classList.add('selected');
+                    recordItem.addEventListener('click', () => selectRecord(record.id));
+                    recordItem.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showContextMenu(e, record.id, 'record'); });
+                    recordItem.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', record.id); recordItem.classList.add('is-dragging'); });
+                    recordItem.addEventListener('dragend', () => recordItem.classList.remove('is-dragging'));
+                    parentElement.appendChild(recordItem);
+                });
+            };
+            const selectRecord = (recordId) => {
+                selectedRecord = records.find(r => r.id === recordId);
+                document.querySelectorAll('.record-item').forEach(el => el.classList.toggle('selected', el.dataset.id === recordId));
+                if (selectedRecord) {
+                    contentTitle.textContent = `記録: ${selectedRecord.title}`;
+                    transcriptContainer.innerHTML = `<pre class="whitespace-pre-wrap text-sm">${selectedRecord.transcript}</pre>`;
+                    showView('transcript');
+                    rightPanelContent.innerHTML = '';
+                    rightPanelDisplay.classList.remove('hidden');
+                    if(selectedRecord.audioBlob) { const audioURL = URL.createObjectURL(selectedRecord.audioBlob); const audioPlayer = document.createElement('div'); audioPlayer.innerHTML = `<h4 class="font-bold text-lg mb-2 text-gray-300">録音音声</h4><audio controls src="${audioURL}"></audio>`; rightPanelContent.appendChild(audioPlayer); }
+                    if (selectedRecord.summary) { const summaryEl = document.createElement('div'); summaryEl.innerHTML = `<h4 class="font-bold text-lg mt-4 mb-2 text-gray-300">要約結果</h4><pre class="whitespace-pre-wrap">${selectedRecord.summary}</pre>`; rightPanelContent.appendChild(summaryEl); }
+                    summarizeButton.disabled = false;
+                }
+            };
+            const deselectAll = (renderHome = true) => {
+                selectedRecord = null; document.querySelectorAll('.record-item.selected').forEach(el => el.classList.remove('selected'));
+                summarizeButton.disabled = true; rightPanelDisplay.classList.add('hidden');
+                if (renderHome) { contentTitle.textContent = '最近の記録履歴'; showView('recent'); renderRecords(records.filter(r => !r.folderId), recentHistory); }
+            };
+            const renderPromptTemplates = () => { promptTemplatesContainer.innerHTML = ''; promptTemplates.forEach((template) => { const item = document.createElement('div'); item.className = 'bg-gray-700 rounded-lg p-4'; item.innerHTML = `<h5 class="font-semibold mb-2">${template.title}</h5><p class="text-sm text-gray-400">${template.text}</p>`; promptTemplatesContainer.appendChild(item); }); };
+            
+            // --- Speech Recognition & Audio Recording ---
+            const setupRecognition = () => {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) { showMessageModal('エラー', 'Web Speech APIに対応していません。'); return; }
+                recognition = new SpeechRecognition();
+                recognition.lang = 'ja-JP'; recognition.continuous = true; recognition.interimResults = true;
+                recognition.onstart = () => {
+                    recordButton.textContent = '録音を停止'; recordButton.classList.replace('bg-blue-600', 'bg-red-600');
+                    deselectAll(); contentTitle.textContent = 'リアルタイム文字起こし';
+                    transcriptContainer.innerHTML = ''; showView('transcript');
+                };
+                recognition.onend = () => { if (isRecording) { console.log("Speech recognition stopped, restarting..."); recognition.start(); } };
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            currentTranscript += event.results[i][0].transcript + '。\n';
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    transcriptContainer.innerHTML = `<p>${currentTranscript}${interimTranscript}</p>`;
+                };
+                recognition.onerror = (event) => { showMessageModal('エラー', `音声認識エラー: ${event.error}`); if(isRecording) stopRecording(false); };
+            };
+            const startRecording = async () => {
+                if (isRecording) return;
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    isRecording = true; audioChunks = []; mediaRecorder = new MediaRecorder(localStream);
+                    mediaRecorder.addEventListener("dataavailable", e => audioChunks.push(e.data)); mediaRecorder.start();
+                    currentTranscript = ''; 
+                    recognition.start();
+                    timerDisplay.classList.remove('hidden');
+                    recordingStartTime = Date.now();
+                    recordingTimerInterval = setInterval(() => {
+                        const elapsedTime = Date.now() - recordingStartTime;
+                        const seconds = Math.floor((elapsedTime / 1000) % 60).toString().padStart(2, '0');
+                        const minutes = Math.floor((elapsedTime / (1000 * 60)) % 60).toString().padStart(2, '0');
+                        const hours = Math.floor(elapsedTime / (1000 * 60 * 60)).toString().padStart(2, '0');
+                        timerDisplay.textContent = `${hours}:${minutes}:${seconds}`;
+                    }, 1000);
+                } catch (err) { showMessageModal('マイクエラー', 'マイクへのアクセスが許可されませんでした。'); }
+            };
+            const stopRecording = (saveText = true) => {
+                if (!isRecording) return;
+                isRecording = false; recognition.stop();
+                
+                clearInterval(recordingTimerInterval);
+                timerDisplay.classList.add('hidden');
+                timerDisplay.textContent = '00:00:00';
+                const handleStop = async () => {
+                    if(localStream) localStream.getTracks().forEach(track => track.stop());
+                    recordButton.textContent = '録音を開始'; recordButton.classList.replace('bg-red-600', 'bg-blue-600');
+                    if (saveText && currentTranscript.trim()) {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const newRecord = { id: crypto.randomUUID(), title: recordTitleInput.value.trim() || '無題の記録', date: new Date().toISOString(), transcript: currentTranscript.trim(), summary: null, folderId: null, audioBlob: audioBlob };
+                        await saveData('records', newRecord); records.unshift(newRecord);
+                        showMessageModal('録音完了', `「${newRecord.title}」を保存しました。`); deselectAll(); await updateStorageUsage();
+                    } else { deselectAll(); }
+                };
+                if(mediaRecorder && mediaRecorder.state === "recording") { mediaRecorder.onstop = handleStop; mediaRecorder.stop(); } else { handleStop(); }
+            };
+
+            // --- File Transcription ---
+            const transcribeFile = async (file) => {
+                if (!file) return;
+                if (!huggingFaceApiKey) { showMessageModal('APIキー未設定', 'ファイル文字起こし機能には、設定画面でHugging Face APIキーを入力してください。'); return; }
+                contentTitle.textContent = 'ファイルを処理中...';
+                transcriptContainer.innerHTML = '<p>AIが文字起こしをしています...（ファイルサイズによって時間がかかる場合があります）</p>';
+                showView('transcript'); deselectAll(false);
+                try {
+                    const response = await fetch(WHISPER_API_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${huggingFaceApiKey}` }, body: file });
+                    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'APIエラーが発生しました。'); }
+                    const result = await response.json();
+                    const transcript = result.text.trim();
+                    const title = prompt('記録のタイトルを入力してください:', file.name.replace(/\.[^/.]+$/, ""));
+                    const newRecord = { id: crypto.randomUUID(), title: title || '無題の記録', date: new Date().toISOString(), transcript: transcript, summary: null, folderId: null, audioBlob: file };
+                    await saveData('records', newRecord);
+                    records.unshift(newRecord);
+                    showMessageModal('完了', 'ファイルからの文字起こしが完了しました。');
+                    deselectAll();
+                    await updateStorageUsage();
+                } catch (error) { showMessageModal('エラー', `文字起こしに失敗しました: ${error.message}`); deselectAll(); }
+                finally { audioUpload.value = ''; }
+            };
+            
+            // --- Summary ---
+            const executeSummary = async (template) => {
+                rightPanelDisplay.classList.remove('hidden'); let rightPanelHTML = '';
+                if(selectedRecord.audioBlob) { const audioURL = URL.createObjectURL(selectedRecord.audioBlob); rightPanelHTML += `<div><h4 class="font-bold text-lg mb-2 text-gray-300">録音音声</h4><audio controls src="${audioURL}"></audio></div>`; }
+                rightPanelHTML += `<div><h4 class="font-bold text-lg mt-4 mb-2 text-gray-300">元の文字起こし</h4><pre class="whitespace-pre-wrap">${selectedRecord.transcript}</pre></div>`;
+                rightPanelContent.innerHTML = rightPanelHTML;
+                contentTitle.textContent = '要約結果'; showView('summary'); summaryContainer.innerHTML = '<p>AIが要約を生成中です...</p>';
+                try {
+                    const response = await fetch(GEMINI_API_ENDPOINT + `?key=${geminiApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: `${template.text}\n\n# 文字起こしテキスト:\n\n---\n\n${selectedRecord.transcript}` }] }] }) });
+                    if (!response.ok) throw await response.json();
+                    const data = await response.json(); const summary = data?.candidates?.[0]?.content?.parts?.[0]?.text || '要約に失敗しました。';
+                    summaryContainer.innerHTML = `<pre class="whitespace-pre-wrap text-sm">${summary}</pre>`; selectedRecord.summary = summary; await saveData('records', selectedRecord);
+                } catch(error) { const errorMessage = error?.error?.message || error.toString(); summaryContainer.innerHTML = `<p class="text-red-400">要約中にエラーが発生しました: ${errorMessage}</p>`; showMessageModal('APIエラー', `要約中にエラーが発生しました: ${errorMessage}`); }
+            };
+
+            // --- Context Menu ---
+            const showContextMenu = (e, id, type) => {
+                contextMenu.style.left = `${e.clientX}px`; contextMenu.style.top = `${e.clientY}px`; contextMenu.classList.remove('hidden');
+                contextMenu.dataset.id = id; contextMenu.dataset.type = type;
+                const hasAudio = type === 'record' ? records.find(r => r.id === id)?.audioBlob : false;
+                contextDeleteAudio.style.display = hasAudio ? 'block' : 'none';
+            };
+            
+            // --- Attach Event Listeners ---
+            const attachAllEventListeners = () => {
+                homeButton.addEventListener('click', deselectAll);
+                recordButton.addEventListener('click', () => { if (isRecording) { stopRecording(); } else { titleModal.classList.remove('hidden'); titleModal.classList.add('flex'); recordTitleInput.value = `記録 - ${new Date().toLocaleString('ja-JP')}`; } });
+                startRecordingButton.addEventListener('click', () => { titleModal.classList.add('hidden'); startRecording(); });
+                cancelRecordingButton.addEventListener('click', () => titleModal.classList.add('hidden'));
+                summarizeButton.addEventListener('click', () => {
+                    if (!selectedRecord) { showMessageModal('記録未選択', '要約する記録を選択してください。'); return; }
+                    if (!geminiApiKey) { showMessageModal('APIキー未設定', '設定画面でGemini APIキーを入力してください。'); return; }
+                    contentTitle.textContent = '要約プロンプトを選択';
+                    summaryContainer.innerHTML = ''; showView('summary');
+                    promptTemplates.forEach(template => {
+                        const button = document.createElement('button');
+                        button.className = 'w-full text-left p-3 bg-gray-600 rounded-lg hover:bg-gray-500 mb-2';
+                        button.innerHTML = `<div class="font-bold">${template.title}</div><p class="text-sm text-gray-400 truncate">${template.text}</p>`;
+                        button.addEventListener('click', () => executeSummary(template));
+                        summaryContainer.appendChild(button);
+                    });
+                });
+                audioUpload.addEventListener('change', (e) => transcribeFile(e.target.files[0]));
+                settingsButton.addEventListener('click', () => settingsModal.classList.replace('hidden', 'flex'));
+                closeSettingsButton.addEventListener('click', async () => {
+                    settingsModal.classList.replace('flex', 'hidden');
+                    geminiApiKey = geminiApiKeyInput.value;
+                    huggingFaceApiKey = huggingFaceApiKeyInput.value;
+                    await saveData('settings', {key: 'geminiApiKey', value: geminiApiKey});
+                    await saveData('settings', {key: 'huggingFaceApiKey', value: huggingFaceApiKey});
+                });
+                closeModalButton.addEventListener('click', () => messageModal.classList.add('hidden'));
+                addFolderButton.addEventListener('click', async () => {
+                    const name = prompt('新しいフォルダ名:');
+                    if (name && name.trim()) { const newFolder = { id: crypto.randomUUID(), name: name.trim() }; await saveData('folders', newFolder); folders.push(newFolder); renderFolders(); }
+                });
+                clearDataButton.addEventListener('click', () => { if (confirm('全ての記録、フォルダ、設定を削除します。よろしいですか？')) resetData(); });
+                addTemplateButton.addEventListener('click', async () => {
+                    const title = prompt('新しいテンプレートのタイトル:');
+                    if(!title) return;
+                    const text = prompt('新しいプロンプトの内容:');
+                    if(!text) return;
+                    promptTemplates.push({title, text});
+                    await saveData('settings', {key: 'promptTemplates', value: promptTemplates});
+                    renderPromptTemplates();
+                });
+                document.addEventListener('click', () => contextMenu.classList.add('hidden'));
+                contextRename.addEventListener('click', async () => {
+                    const id = contextMenu.dataset.id; const type = contextMenu.dataset.type; contextMenu.classList.add('hidden');
+                    if (type === 'folder') {
+                        const folder = folders.find(f => f.id === id);
+                        if (folder) { const newName = prompt('新しいフォルダ名:', folder.name); if (newName && newName.trim()) { folder.name = newName.trim(); await saveData('folders', folder); renderFolders(); } }
+                    } else if (type === 'record') {
+                        const record = records.find(r => r.id === id);
+                        if (record) { const newTitle = prompt('新しい記録タイトル:', record.title); if (newTitle && newTitle.trim()) { record.title = newTitle.trim(); await saveData('records', record); if(selectedRecord && selectedRecord.id === id) contentTitle.textContent = `記録: ${record.title}`; deselectAll(); } }
+                    }
+                });
+                contextDelete.addEventListener('click', () => {
+                    const id = contextMenu.dataset.id; const type = contextMenu.dataset.type; contextMenu.classList.add('hidden');
+                    deleteConfirmModal.classList.remove('hidden'); deleteConfirmModal.classList.add('flex');
+                    if (type === 'folder') {
+                        const folder = folders.find(f => f.id === id);
+                        if (folder) {
+                            if(records.some(r => r.folderId === id)) { showMessageModal('削除不可', 'フォルダ内に記録があるため削除できません。'); deleteConfirmModal.classList.add('hidden'); return; }
+                            deleteConfirmMessage.textContent = `フォルダ「${folder.name}」を削除しますか？`;
+                            confirmDeleteButton.onclick = async () => { await deleteData('folders', id); folders = folders.filter(f => f.id !== id); renderFolders(); deleteConfirmModal.classList.add('hidden'); deselectAll(); };
+                        }
+                    } else if (type === 'record') {
+                        const record = records.find(r => r.id === id);
+                        if (record) {
+                            deleteConfirmMessage.textContent = `記録「${record.title}」を削除しますか？\n(音声ファイルも一緒に削除されます)`;
+                            confirmDeleteButton.onclick = async () => { await deleteData('records', id); records = records.filter(r => r.id !== id); deleteConfirmModal.classList.add('hidden'); showMessageModal('削除完了', `記録「${record.title}」を削除しました。`); deselectAll(); await updateStorageUsage(); };
+                        }
+                    }
+                });
+                contextDeleteAudio.addEventListener('click', async () => {
+                    const id = contextMenu.dataset.id; contextMenu.classList.add('hidden');
+                    const record = records.find(r => r.id === id);
+                    if (record && confirm(`「${record.title}」の音声ファイルのみを削除しますか？\n文字起こしテキストは残ります。`)) {
+                        delete record.audioBlob;
+                        await saveData('records', record);
+                        showMessageModal('削除完了', '音声ファイルを削除しました。');
+                        if (selectedRecord && selectedRecord.id === id) selectRecord(id); else deselectAll();
+                        await updateStorageUsage();
+                    }
+                });
+                cancelDeleteButton.addEventListener('click', () => { deleteConfirmModal.classList.add('hidden'); deleteConfirmModal.classList.remove('flex'); });
+            };
+            
+            initializeApp();
+        });
+    </script>
+</body>
+</html>
+
